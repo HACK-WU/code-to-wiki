@@ -1,0 +1,13 @@
+# Python artifacts
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.eggs/
+
+# Build / dist
+build/
+dist/
+
+# Local temp files written by atomic_save_json
+*.tmp

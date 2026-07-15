@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "codetowiki"
+version = "0.1.0"
+description = "Turn code into structured, indexed Wiki documentation (reference index only, no external knowledge base)."
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = []
+
+[project.optional-dependencies]
+fast = ["orjson"]
+
+[project.scripts]
+codetowiki = "codetowiki.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+packages = ["codetowiki", "codetowiki.wiki_incremental"]
