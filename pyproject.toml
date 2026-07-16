@@ -1,6 +1,7 @@
 [build-system]
-requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
+
+requires = [ "setuptools>=61" ]
 
 [project]
 name = "codetowiki"
@@ -8,17 +9,27 @@ version = "0.1.0"
 description = "Turn code into structured, indexed Wiki documentation (reference index only, no external knowledge base)."
 readme = "README.md"
 requires-python = ">=3.9"
-dependencies = []
+classifiers = [
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+]
+dependencies = [  ]
 
-[project.optional-dependencies]
-fast = ["orjson"]
+optional-dependencies.fast = [ "orjson" ]
+scripts.codetowiki = "codetowiki.cli:main"
 
-[project.scripts]
-codetowiki = "codetowiki.cli:main"
+[dependency-groups]
+dev = [
+  "pytest>=8.4.2",
+]
 
 [tool.setuptools]
-package-dir = {"" = "src"}
-packages = ["codetowiki", "codetowiki.wiki_incremental"]
+package-dir = { "" = "src" }
+packages = [ "codetowiki", "codetowiki.wiki_incremental" ]
 
 [tool.ruff]
 target-version = "py39"

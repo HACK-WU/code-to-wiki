@@ -140,7 +140,7 @@ CodeToWiki 提供 `codetowiki wiki-format` 命令，覆盖 R1-R6 全部规则。
 ```bash
 # 检查单篇（生成后立即执行）
 codetowiki wiki-format --file <生成的wiki.md>
-# 退出码：0=合规，1=存在 error（或 --strict 时存在 warning）
+# 退出码：0=合规；1=存在 error（或 --strict 时存在 warning）；2=运行异常（如文件无法读取/解析失败）
 
 # CI 门禁：递归检查整个 wiki 目录
 codetowiki wiki-format --wiki-dir <wiki_root>

@@ -59,13 +59,17 @@ codetowiki build-index \
   --wiki-dir <wiki_dir> \
   --metadata <wiki_dir>/metadata.json \
   --repo-dir . \
+  --repo-prefix <repo-prefix> \
+  --check-paths \
   --output <wiki_dir>/metadata.json
 ```
 
 参数说明：
 - `--wiki-dir`：wiki 文档目录（相对路径）
-- `--metadata`：已有 metadata.json（保留 excluded_paths、noise_paths 等配置）
+- `--metadata`：已有 metadata.json（保留 excluded_paths、noise_paths 等配置，并自动继承其 `source.repo_url`/`branch`）
 - `--repo-dir`：源代码仓库根目录（用于获取当前 commit_id）
+- `--repo-prefix`（可选）：仓库路径前缀，供 Wiki 目录推断使用，对应 `metadata.repo_prefix`
+- `--check-paths`（可选）：校验 wiki 引用是否指向真实存在的源码，发现幽灵引用时输出到 stderr 并写入 `metadata.warnings`
 - `--output`：输出路径（原地更新）
 
 ### Step 3: 验证映射

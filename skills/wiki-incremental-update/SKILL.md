@@ -23,7 +23,18 @@
 ## 前置检查
 
 1. 确认当前工作目录是源代码仓库根目录。
-2. 确认 `<wiki_dir>/metadata.json` 存在。
+2. 确认 `<wiki_dir>/metadata.json` 是否存在：
+   - **不存在**：先 `init` 生成骨架（写入默认 `excluded_paths`/`noise_paths`，`source.commit_id` 留空，后续由 build-index 填充）：
+
+     ```bash
+     codetowiki init \
+       --project-name <project> \
+       --wiki-dir <wiki_dir> \
+       --repo-url <repo-url> \
+       --branch <branch> \
+       --output <wiki_dir>/metadata.json
+     ```
+   - **已存在**：直接进入下一步。
 3. 如果 `metadata.json` 不含 `source_to_wiki` 或 `wiki_to_source`，先构建索引：
 
 ```bash
@@ -33,10 +44,14 @@ codetowiki build-index \
   --repo-dir . \
   --repo-url <repo-url> \
   --branch <branch> \
+  --repo-prefix <repo-prefix> \
+  --check-paths \
   --output <wiki_dir>/metadata.json
 ```
 
-`--metadata` 读取已有配置（excluded_paths/noise_paths 等），防止被 `setdefault` 默认值覆盖。
+- `--metadata` 读取已有配置（excluded_paths/noise_paths 等），防止被 `setdefault` 默认值覆盖。
+- `--repo-prefix`（可选）：仓库根下的路径前缀（如 `src/`），供新文件 Wiki 目录推断使用，与 `metadata.repo_prefix` 对应。
+- `--check-paths`（可选）：校验 wiki 引用的源码路径是否真实存在，发现幽灵引用时写入 `metadata.warnings` 并输出到 stderr；它不改写索引，仅辅助暴露失效引用，引用仓库外源码时可省略。
 
 ## 标准流程
 
