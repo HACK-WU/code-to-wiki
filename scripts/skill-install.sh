@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # ============================================================
-# CodeToWiki Skill 安装器 — 将本项目内置的 Skills 复制到目标项目
+# CodeToWiki Skill 安装器 — 从远程仓库下载 Skills 并复制到目标项目
 #
-# 与上游 HACK-WU/skills 的 skill-install.sh 行为一致，但来源为本
-# 地项目自带的 skills/ 目录（而非远程 GitHub 下载），且**仅支持
-# --skills 模式（不含 --rules）**。
+# 与上游 HACK-WU/skills 的 skill-install.sh 行为一致，仅支持
+# --skills 模式（不含 --rules）。**默认从远程仓库下载 skills/**
+# （与上游一致：Skills 本就是远程分发的，不具备本地复制能力），
+# 仅当显式设置 SKILLS_SRC 且为有效目录时，才改用本地目录（开发者覆盖）。
 #
 # 用法:
 #   bash scripts/skill-install.sh --skills -t /path/to/target
@@ -13,14 +14,22 @@
 #   bash scripts/skill-install.sh --skills --file ~/targets.txt
 #   bash scripts/skill-install.sh /path/to/target            # 兼容简写（默认按 skills）
 #
+# 也支持 curl|bash 一键安装:
+#   curl -fsSL https://raw.githubusercontent.com/HACK-WU/CodeToWiki/master/scripts/skill-install.sh \
+#     | bash -s -- --skills -t /path/to/target
+#
 # 环境变量:
-#   SKILLS_SRC   覆盖源 skills 目录（默认: 脚本上级目录的 skills/）
+#   SKILLS_SRC   可选：覆盖为本地源 skills 目录（默认从远程下载，不依赖本地）
+#   REPO         远程仓库 owner/repo（默认: HACK-WU/CodeToWiki）
+#   REF          远程分支/标签（默认: master）
 # ============================================================
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-SOURCE_SKILLS_DIR="${SKILLS_SRC:-$PROJECT_ROOT/skills}"
+# 源 skills 目录：默认留空，稍后在父 shell 中解析为远程下载；
+# 仅当显式设置 SKILLS_SRC 且为有效目录时改用本地（开发者覆盖）。
+SOURCE_SKILLS_DIR="${SKILLS_SRC:-}"
 DEFAULT_TARGETS="$HOME/.skill-targets"
 
 POSITIONAL_TARGET=""
@@ -155,14 +164,44 @@ name_matches() {
   return 1
 }
 
-# 递归发现本地 skills 目录下的文件列表
+# 递归发现 skills 目录下的文件列表（本地或远程回退后均可用）
 # 输出: 每行一个相对路径（如 wiki-incremental-update/SKILL.md）
-discover_local_skills() {
+discover_skills() {
   if [ ! -d "$SOURCE_SKILLS_DIR" ]; then
     echo "错误: 源 skills 目录不存在: $SOURCE_SKILLS_DIR" >&2
     return 1
   fi
   ( cd "$SOURCE_SKILLS_DIR" && find . -type f | sed 's#^\./##' )
+}
+
+# 本地 skills 目录缺失时（典型场景: curl|bash 管道运行），
+# 从 GitHub 下载仓库 tarball 并解压出 skills/ 作为源。
+fetch_remote_skills() {
+  local repo="${REPO:-HACK-WU/CodeToWiki}"
+  local ref="${REF:-master}"
+  local tar_url="https://github.com/${repo}/archive/refs/heads/${ref}.tar.gz"
+  local tmp
+  tmp="$(mktemp -d)"
+  echo "本地 skills 目录缺失，改从远程下载: ${repo}@${ref}" >&2
+
+  if ! curl -fsSL "$tar_url" -o "$tmp/repo.tgz" 2>/dev/null; then
+    tar_url="https://github.com/${repo}/archive/${ref}.tar.gz"
+    curl -fsSL "$tar_url" -o "$tmp/repo.tgz" 2>/dev/null \
+      || { echo "错误: 远程下载失败: $tar_url" >&2; rm -rf "$tmp"; exit 1; }
+  fi
+
+  tar -xzf "$tmp/repo.tgz" -C "$tmp" 2>/dev/null \
+    || { echo "错误: 远程 tarball 解压失败: $tar_url" >&2; rm -rf "$tmp"; exit 1; }
+
+  local extracted
+  extracted="$(find "$tmp" -maxdepth 1 -type d -name '*-*' | head -n1)"
+  if [ -z "$extracted" ] || [ ! -d "$extracted/skills" ]; then
+    echo "错误: 远程 tarball 中未找到 skills/ 目录" >&2
+    rm -rf "$tmp"
+    exit 1
+  fi
+  # 仅本行作为返回值（stdout）被调用方捕获，进度信息一律走 stderr
+  echo "$extracted/skills"
 }
 
 # ============================================================
@@ -180,7 +219,7 @@ install_skills() {
   while IFS= read -r f; do
     [ -z "$f" ] && continue
     FILES+=("$f")
-  done < <(discover_local_skills)
+  done < <(discover_skills)
 
   echo "🧠 安装 AI Skills → ${DEST}"
   echo ""
@@ -260,19 +299,19 @@ install_skills() {
 # 按模式执行（支持多目标目录）
 # ============================================================
 echo "🚀 skill-install.sh"
-echo " 源 skills: ${SOURCE_SKILLS_DIR}"
 echo " 目标来源:  ${SOURCE_DESC}"
 echo " 目标数量:  ${#TARGET_DIRS[@]}"
 echo " 安装模式:  ${MODES[*]}"
 [ ${#NAME_LIST[@]} -gt 0 ] && echo " 名称过滤:  $(IFS=', '; echo "${NAME_LIST[*]}")"
 echo ""
 
-# 源 skills 目录必须在父 shell 中校验：发现函数运行在进程替换子 shell 中，
-# 其 exit 码会被静默吞掉，导致缺失目录时仍打印"完成"且安装 0 个文件。
-if [ ! -d "$SOURCE_SKILLS_DIR" ]; then
-  echo "错误: 源 skills 目录不存在: $SOURCE_SKILLS_DIR" >&2
-  echo "（可通过环境变量 SKILLS_SRC 指定源目录）" >&2
-  exit 1
+# 源 skills 目录解析：默认从远程仓库 tarball 下载；仅当显式设置
+# SKILLS_SRC 且为有效目录时，才使用本地目录（开发者覆盖）。
+# 远程下载在父 shell 中执行，失败会真实报错退出，不会静默"完成"。
+if [ -n "$SOURCE_SKILLS_DIR" ] && [ -d "$SOURCE_SKILLS_DIR" ]; then
+  echo "（使用本地源 skills: ${SOURCE_SKILLS_DIR}）"
+else
+  SOURCE_SKILLS_DIR="$(fetch_remote_skills)"
 fi
 
 ANY_INSTALLED=0

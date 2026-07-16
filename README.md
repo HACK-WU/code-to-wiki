@@ -21,6 +21,38 @@ curl -fsSL https://raw.githubusercontent.com/HACK-WU/CodeToWiki/master/scripts/i
 ```bash
 pip install -e ".[fast]"
 ```
+
+## 安装 AI Skills 到目标项目
+
+把本项目的三个 AI 技能（`code-to-wiki` / `wiki-incremental-update` / `wiki-metadata-sync`）安装到任意项目，供 CodeBuddy 等加载。脚本**默认从 GitHub 远程下载** `skills/` 并复制到目标项目的 `skills/`（与上游一致，Skills 本就是远程分发的，不具备本地复制能力）：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/HACK-WU/CodeToWiki/master/scripts/skill-install.sh \
+  | bash -s -- --skills -t /path/to/target
+```
+
+本地运行同样默认远程下载（不依赖本地 `skills/`）：
+
+```bash
+bash scripts/skill-install.sh --skills -t /path/to/target
+```
+
+### 参数说明
+
+| 参数 | 作用 |
+|------|------|
+| `--skills` | 安装模式开关：把 Skills 复制到目标项目的 `skills/` |
+| `-t <dir>` | 指定目标项目目录，可多次使用（如 `-t a -t b`） |
+| `--file <txt>` | 从配置文件读取目标目录列表（每行一个路径，支持 `#` 注释），与 `-t` 互斥 |
+| `-n <name>` | 按 skill 名过滤，逗号分隔或多次使用（如 `-n code-to-wiki`），缺省安装全部 |
+| `--rules` | **不支持**（本项目仅分发 Skills），传入即报错退出 |
+
+说明：
+- `-t` 与 `--file` 互斥；都不传时读取默认配置 `$HOME/.skill-targets`。
+- 目标目录若以 `skills` 结尾则直接写入、不再额外嵌套 `skills/` 子目录。
+- 位置参数等价于 `-t`（如 `bash scripts/skill-install.sh /path/to/target`）。
+- 远程安装时可用环境变量覆盖来源：`REPO`（默认 `HACK-WU/CodeToWiki`）、`REF`（默认 `master`）；如需改用本地源（开发调试）可用 `SKILLS_SRC` 覆盖源 `skills/` 目录。
+
 ## 快速开始
 
 ```bash
