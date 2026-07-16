@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+from . import __version__
 from .wiki_incremental import cli as inc_cli
 from .wiki_incremental.index_builder import DEFAULT_EXCLUDED_PATHS, DEFAULT_NOISE_PATHS
 from .wiki_incremental.json_utils import atomic_save_json, load_json
@@ -47,6 +48,12 @@ def _cmd_init(args: argparse.Namespace) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="codetowiki", description="CodeToWiki: code -> indexed wiki (reference index)")
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"%(prog)s {__version__}",
+        help="Show the codetowiki version and exit",
+    )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     # build-index / detect / lookup delegate to the incremental helper CLI
