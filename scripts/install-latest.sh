@@ -10,16 +10,21 @@
 #
 # 环境变量:
 # REPO=owner/repo        手动指定 GitHub 仓库（默认从 git remote 推断，
-#                        失败则回退到 HACK-WU/CodeToWiki-）
+#                        失败则回退到 HACK-WU/CodeToWiki）
 # GITHUB_TOKEN=xxx       提供后用于 GitHub API 鉴权，缓解未登录时的限流
-# INSTALL_METHOD=uv|pip  强制指定安装后端（默认 uv，未安装则回退 pip）
+# INSTALL_METHOD=uv|pip  强制指定安装后端（默认自动探测：有 uv 用 uv，否则 pip）
+#     uv  → uv tool install --force <wheel_url>
+#           将 codetowiki 作为独立工具安装到 uv 的隔离环境，
+#           命令通常位于 ~/.local/bin（需确保该目录在 PATH 中）。
+#     pip → pip3/pip install --user --upgrade --force-reinstall <wheel_url>
+#           以 --user 方式安装到用户站点目录，--force-reinstall 覆盖旧版本。
 # ============================================================
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PKG_NAME="codetowiki"
 PKG_CMD="codetowiki"          # 安装后用于校验版本的命令
-DEFAULT_REPO="HACK-WU/CodeToWiki-"
+DEFAULT_REPO="HACK-WU/CodeToWiki"
 INCLUDE_PRE="false"
 INSTALL_METHOD="${INSTALL_METHOD:-}"
 

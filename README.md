@@ -16,6 +16,25 @@
 
 ## 安装
 
+### 一键安装（推荐）
+
+通过 `curl | bash` 直接拉取最新 Release 的 wheel 并安装（脚本会自动用 `uv` 或 `pip` 安装，无需克隆仓库）：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/HACK-WU/CodeToWiki/master/scripts/install-latest.sh | bash
+```
+
+可选参数：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/HACK-WU/CodeToWiki/master/scripts/install-latest.sh | bash -s -- --pre  # 包含预发布版本
+REPO=owner/repo curl -fsSL https://raw.githubusercontent.com/HACK-WU/CodeToWiki/master/scripts/install-latest.sh | bash  # 覆盖默认仓库
+```
+
+> 安装后如需加速 JSON 读写，可补装可选依赖：`pip install 'codetowiki[fast]'`。
+
+### 从源码可编辑安装（开发者）
+
 ```bash
 pip install -e .            # 可编辑安装，提供 codetowiki 命令
 pip install -e ".[fast]"    # 可选：用 orjson 加速 JSON 读写
