@@ -24,7 +24,7 @@ pip install -e ".[fast]"
 
 ## 安装 AI Skills 到目标项目
 
-把本项目的四个 AI 技能（`code-to-wiki` / `wiki-incremental-update` / `wiki-metadata-sync` / `wiki-lookup`）安装到任意项目，供 CodeBuddy 等加载。脚本**默认从 GitHub 远程下载** `skills/` 并复制到目标项目的 `skills/`（与上游一致，Skills 本就是远程分发的，不具备本地复制能力）：
+把本项目的四个 AI 技能（`code-to-wiki` / `wiki-incremental-update` / `wiki-metadata-sync` / `wiki-lookup`）安装到任意项目，供 CodeBuddy 等加载。
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/HACK-WU/CodeToWiki/master/scripts/skill-install.sh \
