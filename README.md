@@ -5,7 +5,7 @@
 只做一件事：**code → wiki + 引用索引（reference index）**，不依赖任何外部知识库 / 语义索引（如 ki / knowledge-indexer）。索引是纯本地 JSON（`metadata.json`），记录「源文件 ↔ Wiki 页面」的双向映射，并支持按 commit 增量更新。
 ## 组件
 
-`skills/` 下三个 AI 技能（`code-to-wiki` 生成 Wiki、`wiki-incremental-update` 增量同步、`wiki-metadata-sync` 手动编辑后重建索引）；`src/codetowiki/` 为格式校验 + 索引构建/检测/反查/增量更新的 Python 包；`tests/` 为单测。
+`skills/` 下四个 AI 技能（`code-to-wiki` 生成 Wiki、`wiki-incremental-update` 增量同步、`wiki-metadata-sync` 手动编辑后重建索引、`wiki-lookup` 按文件/commit 反查受影响 Wiki）；`src/codetowiki/` 为格式校验 + 索引构建/检测/反查/增量更新的 Python 包；`tests/` 为单测。
 
 ## 安装
 
@@ -24,7 +24,7 @@ pip install -e ".[fast]"
 
 ## 安装 AI Skills 到目标项目
 
-把本项目的三个 AI 技能（`code-to-wiki` / `wiki-incremental-update` / `wiki-metadata-sync`）安装到任意项目，供 CodeBuddy 等加载。脚本**默认从 GitHub 远程下载** `skills/` 并复制到目标项目的 `skills/`（与上游一致，Skills 本就是远程分发的，不具备本地复制能力）：
+把本项目的四个 AI 技能（`code-to-wiki` / `wiki-incremental-update` / `wiki-metadata-sync` / `wiki-lookup`）安装到任意项目，供 CodeBuddy 等加载。脚本**默认从 GitHub 远程下载** `skills/` 并复制到目标项目的 `skills/`（与上游一致，Skills 本就是远程分发的，不具备本地复制能力）：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/HACK-WU/CodeToWiki/master/scripts/skill-install.sh \
@@ -55,15 +55,16 @@ bash scripts/skill-install.sh --skills -t /path/to/target
 
 ## Skills 使用方式
 
-安装到目标项目后，由 CodeBuddy 等 AI 编码助手按场景自动加载。三个 Skill 覆盖「生成 → 增量更新 → 索引同步」完整链路；所有能力均通过 `codetowiki` CLI 暴露，Skill 本身不直接调用内部 Python 模块。
+安装到目标项目后，由 CodeBuddy 等 AI 编码助手按场景自动加载。四个 Skill 覆盖「生成 → 增量更新 → 索引同步 → 反查」完整链路；所有能力均通过 `codetowiki` CLI 暴露，Skill 本身不直接调用内部 Python 模块。
 
 | Skill | 触发场景 | 关键命令 |
 |-------|----------|----------|
 | [`code-to-wiki`](skills/code-to-wiki/SKILL.md) | 用户要求「根据代码生成 wiki」「为某模块写文档」「梳理代码生成文档」。先与用户确认 Wiki 存储位置，再走「大纲确认 → 分批撰写 → 每篇 `codetowiki wiki-format` 校验」流程 | `codetowiki wiki-format --file/--wiki-dir [--fix]` |
 | [`wiki-incremental-update`](skills/wiki-incremental-update/SKILL.md) | 用户要求「根据某 commit 更新 Wiki」「分析变更影响哪些 Wiki 页面」。先 `detect` dry-run，AI 决策新功能是否建页，再更新受影响页面并 `sync-index` | `codetowiki detect` / `codetowiki cleanup-citations` / `codetowiki sync-index` / `codetowiki wiki-format` |
 | [`wiki-metadata-sync`](skills/wiki-metadata-sync/SKILL.md) | 用户直接手动创建/编辑/删除 Wiki 后，要求「更新 metadata.json 映射」「rebuild index」 | `codetowiki build-index` / `codetowiki sync-index` |
+| [`wiki-lookup`](skills/wiki-lookup/SKILL.md) | 用户要求「改代码前查相关 Wiki」「review 时查受影响 Wiki」「排查问题时理解架构」。按文件或 commit 反查受影响 Wiki 并按命中数降序 | `codetowiki lookup` |
 
-> 各 Skill 的详细流程、Wiki 格式规范（R1-R7）与调用纪律见 [`skills/code-to-wiki/SKILL.md`](skills/code-to-wiki/SKILL.md)、[`skills/wiki-incremental-update/SKILL.md`](skills/wiki-incremental-update/SKILL.md)、[`skills/wiki-metadata-sync/SKILL.md`](skills/wiki-metadata-sync/SKILL.md)。
+> 各 Skill 的详细流程、Wiki 格式规范（R1-R7）与调用纪律见 [`skills/code-to-wiki/SKILL.md`](skills/code-to-wiki/SKILL.md)、[`skills/wiki-incremental-update/SKILL.md`](skills/wiki-incremental-update/SKILL.md)、[`skills/wiki-metadata-sync/SKILL.md`](skills/wiki-metadata-sync/SKILL.md)、[`skills/wiki-lookup/SKILL.md`](skills/wiki-lookup/SKILL.md)。
 
 ## metadata.json 结构
 
