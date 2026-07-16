@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Unified command line entrypoint for CodeToWiki.
 
 Subcommands:
@@ -18,6 +17,8 @@ from . import __version__
 from .wiki_incremental import cli as inc_cli
 from .wiki_incremental.index_builder import DEFAULT_EXCLUDED_PATHS, DEFAULT_NOISE_PATHS
 from .wiki_incremental.json_utils import atomic_save_json, load_json
+from .wiki_incremental.citation_cleanup import cleanup_dead_citations
+from .wiki_incremental.incremental_index import incremental_index_update, save_metadata
 from .wiki_format_check import main as format_main
 
 
@@ -47,7 +48,9 @@ def _cmd_init(args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="codetowiki", description="CodeToWiki: code -> indexed wiki (reference index)")
+    parser = argparse.ArgumentParser(
+        prog="codetowiki", description="CodeToWiki: code -> indexed wiki (reference index)"
+    )
     parser.add_argument(
         "--version",
         action="version",
@@ -88,8 +91,27 @@ def main(argv: list[str] | None = None) -> int:
     init_parser.add_argument("--wiki-dir", required=True, help="Wiki document directory")
     init_parser.add_argument("--repo-url", default="", help="Source code repository URL")
     init_parser.add_argument("--branch", default="", help="Source code branch name")
-    init_parser.add_argument("--repo-prefix", default="", help="Optional leading path to strip when inferring wiki placement")
+    init_parser.add_argument(
+        "--repo-prefix", default="", help="Optional leading path to strip when inferring wiki placement"
+    )
     init_parser.add_argument("--output", default="metadata.json", help="Output metadata.json path")
+
+    cc_parser = subparsers.add_parser("cleanup-citations", help="Clean dead/renamed source citations from a wiki file")
+    cc_parser.add_argument("--file", required=True, help="Wiki markdown file to clean")
+    cc_parser.add_argument(
+        "--dead", nargs="*", default=[], help="Deleted source paths whose citations should be removed"
+    )
+    cc_parser.add_argument(
+        "--renamed", nargs="*", default=[], help="Renamed source paths as old:new (replace citation paths)"
+    )
+    cc_parser.add_argument("--output", default=None, help="Output file (default: overwrite --file)")
+
+    si_parser = subparsers.add_parser("sync-index", help="Incrementally sync metadata indexes for affected wikis")
+    si_parser.add_argument("--metadata", required=True, help="Path to metadata.json")
+    si_parser.add_argument("--wiki-dir", required=True, help="Wiki document directory")
+    si_parser.add_argument("--wikis", nargs="+", required=True, help="Affected wiki files to re-index")
+    si_parser.add_argument("--commit", required=True, help="New commit id to record in metadata.source.commit_id")
+    si_parser.add_argument("--output", default=None, help="Output metadata path (default: overwrite --metadata)")
 
     args = parser.parse_args(argv)
     cmd = args.command
@@ -133,6 +155,27 @@ def main(argv: list[str] | None = None) -> int:
         if args.json:
             fmt_argv.append("--json")
         return format_main(fmt_argv)
+
+    if cmd == "cleanup-citations":
+        content = Path(args.file).read_text(encoding="utf-8")
+        renamed = {}
+        for item in args.renamed:
+            old, _, new = item.partition(":")
+            if old and new:
+                renamed[old] = new
+        cleaned = cleanup_dead_citations(content, dead_files=list(args.dead), renamed_files=renamed)
+        out = args.output or args.file
+        Path(out).write_text(cleaned, encoding="utf-8")
+        print(f"已清理引用: {out}")
+        return 0
+
+    if cmd == "sync-index":
+        metadata = load_json(args.metadata)
+        updated = incremental_index_update(metadata, args.wikis, args.commit, args.wiki_dir)
+        out = args.output or args.metadata
+        save_metadata(updated, out)
+        print(f"已同步索引: {out}")
+        return 0
 
     if cmd == "init":
         return _cmd_init(args)

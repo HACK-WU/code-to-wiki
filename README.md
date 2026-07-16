@@ -2,107 +2,189 @@
 
 把代码库转化为**结构化、可检索、带引用索引**的 Wiki 文档工具链。
 
-本仓库只做一件事：**code → wiki + 引用索引（reference index）**，不依赖任何外部知识库 / 语义索引（如 ki / knowledge-indexer）。索引是纯本地 JSON（`metadata.json`），记录「源文件 ↔ Wiki 页面」的双向映射，并支持按 commit 增量更新。
-
+只做一件事：**code → wiki + 引用索引（reference index）**，不依赖任何外部知识库 / 语义索引（如 ki / knowledge-indexer）。索引是纯本地 JSON（`metadata.json`），记录「源文件 ↔ Wiki 页面」的双向映射，并支持按 commit 增量更新。
 ## 组件
 
-| 组件 | 说明 |
-|------|------|
-| `skills/code-to-wiki/` | AI 技能：分析代码库并生成合规 Wiki（R1-R6 格式规范内联） |
-| `skills/wiki-incremental-update/` | AI 技能：按 commit 增量检测受影响 Wiki 并同步索引 |
-| `skills/wiki-metadata-sync/` | AI 技能：Wiki 手动编辑后重建引用索引 |
-| `src/codetowiki/` | Python 包：格式校验 + 引用索引构建/检测/反查/增量更新 |
-| `tests/` | 单测 |
+`skills/` 下三个 AI 技能（`code-to-wiki` 生成 Wiki、`wiki-incremental-update` 增量同步、`wiki-metadata-sync` 手动编辑后重建索引）；`src/codetowiki/` 为格式校验 + 索引构建/检测/反查/增量更新的 Python 包；`tests/` 为单测。
 
 ## 安装
 
-### 一键安装（推荐）
-
-通过 `curl | bash` 直接拉取最新 Release 的 wheel 并安装（脚本会自动用 `uv` 或 `pip` 安装，无需克隆仓库）：
+推荐一键安装（自动用 `uv`/`pip` 拉取最新 Release wheel，无需克隆仓库）：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/HACK-WU/CodeToWiki/master/scripts/install-latest.sh | bash
+# 可选参数：--pre 含预发布版本；REPO=owner/repo 覆盖默认仓库
 ```
 
-可选参数：
+开发者可编辑安装（提供 `codetowiki` 命令；`[fast]` 可选 orjson 加速）：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/HACK-WU/CodeToWiki/master/scripts/install-latest.sh | bash -s -- --pre  # 包含预发布版本
-REPO=owner/repo curl -fsSL https://raw.githubusercontent.com/HACK-WU/CodeToWiki/master/scripts/install-latest.sh | bash  # 覆盖默认仓库
+pip install -e ".[fast]"
 ```
-
-> 安装后如需加速 JSON 读写，可补装可选依赖：`pip install 'codetowiki[fast]'`。
-
-### 从源码可编辑安装（开发者）
+## 快速开始
 
 ```bash
-pip install -e .            # 可编辑安装，提供 codetowiki 命令
-pip install -e ".[fast]"    # 可选：用 orjson 加速 JSON 读写
-```
-
-## CLI 用法
-
-```bash
-# 1) 为新项目生成 metadata.json 骨架（不含任何 ki 配置）
-codetowiki init --project-name myproj --wiki-dir wiki --repo-url <git-url> --branch main
-
-# 2) 构建引用索引（解析 <cite> / 章节来源，生成双向映射）
-codetowiki build-index \
-  --wiki-dir wiki \
-  --metadata wiki/metadata.json \
-  --repo-dir . \
-  --repo-url <git-url> --branch main \
-  --output wiki/metadata.json
-
-# 3) 检测某次提交影响的 Wiki 页面（dry-run，不写文件）
+codetowiki init --project-name myproj --wiki-dir wiki --repo-url <git-url> --branch main --output wiki/metadata.json
+codetowiki build-index --wiki-dir wiki --metadata wiki/metadata.json --repo-dir . --repo-url <git-url> --branch main --output wiki/metadata.json
 codetowiki detect --metadata wiki/metadata.json --new-commit <sha> --repo-dir .
-
-# 4) 按文件路径或 commit 反查受影响 Wiki
 codetowiki lookup --metadata wiki/metadata.json --files src/foo.py
-codetowiki lookup --metadata wiki/metadata.json --new-commit <sha> --repo-dir .
-
-# 5) 格式校验（R1-R6），--fix 自动修复可机械修复项
-codetowiki wiki-format --wiki-dir wiki
 codetowiki wiki-format --file wiki/01-xxx.md --fix
 ```
-
-所有子命令也可作为模块直接调用：`python -m codetowiki.cli ...`、`python -m codetowiki.wiki_format_check ...`。
-
-## Python API
-
-```python
-from codetowiki import build_index, detect_changes, lookup_wikis, validate_and_fix
-
-metadata = build_index("wiki/", commit_id="<sha>", repo_url="<git-url>", branch="main")
-report = detect_changes(old_commit, new_commit, metadata, repo_dir=".")
-ranked, unmatched = lookup_wikis(metadata["source_to_wiki"], ["src/foo.py"])
-```
+子命令也可作为模块运行：`python -m codetowiki.cli ...`、`python -m codetowiki.wiki_format_check ...`。
 
 ## metadata.json 结构
+
+`init` / `build-index` 读写的本地索引文件，纯 JSON、无外部依赖。它是所有 `detect`/`lookup` 命令的输入。
 
 ```json
 {
   "project": "myproj",
   "wiki_path": "wiki/",
-  "excluded_paths": ["node_modules/", "vendor/", "*/migrations/", "*/tests/", "*/__init__.py"],
-  "noise_paths": ["*.pyc", "^docs/"],
-  "source": { "commit_id": "...", "repo_url": "...", "branch": "..." },
-  "source_to_wiki": { "src/foo.py": ["01-概览.md"] },
-  "wiki_to_source": { "01-概览.md": ["src/foo.py"] },
-  "stats": { "wiki_count": 1, "source_count": 1, "citation_count": 1 }
+  "excluded_paths": [
+    "node_modules/",
+    "vendor/",
+    "*/migrations/",
+    "*/tests/",
+    "*/__init__.py"
+  ],
+  "noise_paths": [
+    "*.pyc",
+    "^docs/"
+  ],
+  "source": {
+    "commit_id": "...",
+    "repo_url": "...",
+    "branch": "..."
+  },
+  "source_to_wiki": {
+    "src/foo.py": ["01-概览.md"]
+  },
+  "wiki_to_source": {
+    "01-概览.md": ["src/foo.py"]
+  },
+  "repo_prefix": "",
+  "stats": {
+    "wiki_count": 1,
+    "source_count": 1,
+    "citation_count": 1
+  },
+  "warnings": [
+    "引用指向不存在的源码: src/legacy.py"
+  ]
 }
 ```
 
-- `excluded_paths`：构建索引与变更检测都**完全排除**。
-- `noise_paths`：参与索引构建（Wiki 可能引用），但 git diff 时不触发变更检测。
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `project` | str | 项目名称 |
+| `wiki_path` | str | Wiki 文档目录（相对路径） |
+| `excluded_paths` | list[str] | 索引构建与变更检测都**完全排除**的路径（glob/前缀） |
+| `noise_paths` | list[str] | 参与索引构建，但 git diff 时不触发变更检测 |
+| `source.commit_id` | str | 构建时的 commit，由 `--commit` 或 `--repo-dir` 的 `HEAD` 填入 |
+| `source.repo_url` / `branch` | str | 源码仓库地址与分支，缺省时继承 `--metadata` 已有值 |
+| `source_to_wiki` | map[str→list] | 源文件 → 引用它的 Wiki 页面列表（双向映射之一） |
+| `wiki_to_source` | map[str→list] | Wiki 页面 → 它引用的源文件列表（双向映射之二） |
+| `repo_prefix` | str | 仓库根下路径前缀（如 `src/`），供新文件 Wiki 目录推断 |
+| `stats` | map | 统计：`wiki_count` / `source_count` / `citation_count` |
+| `warnings` | list[str] | 仅 `--check-paths` 发现幽灵引用时写入 |
 
-## 与具体项目解耦
+> `excluded_paths` 与 `noise_paths` 的默认值已泛化为通用规则（依赖 / 构建产物 / 测试 / 迁移）。项目专属排除项通过已有 `metadata.json`（`--metadata`）保留，不会被默认值覆盖。
 
-- 默认排除项已泛化为通用规则（依赖/构建产物/测试/迁移）。
-- 项目专属排除项通过已有 `metadata.json`（`--metadata`）保留，不会被默认值覆盖。
-- 路径前缀（如仓库根下的 `src/`）可通过 `metadata.repo_prefix` 配置，供新文件 Wiki 目录推断使用。
+## 命令参考
 
-## 设计边界
+### init —— 生成 metadata.json 骨架
+```bash
+codetowiki init --project-name myproj --wiki-dir wiki --repo-url <git-url> --branch main --output wiki/metadata.json
+```
+```
+已生成 metadata 骨架: wiki/metadata.json
+  project      : myproj
+  wiki_dir     : wiki
+  excluded_paths: 9 条默认规则
+```
 
-- **保留**：引用索引（reference index）+ 其增量更新。
-- **不依赖**：ki / knowledge-indexer 等语义索引、Django 专属工具、任何外部配置模板。
+### build-index —— 构建引用索引
+```bash
+codetowiki build-index --wiki-dir wiki --metadata wiki/metadata.json --repo-dir . \
+  --repo-url <git-url> --branch main --repo-prefix src/ --check-paths --output wiki/metadata.json
+```
+- `--metadata`：保留已有配置并继承 `source.repo_url`/`branch`；`--repo-prefix`（可选）供 Wiki 目录推断；`--check-paths`（可选）校验引用真实性并写入 `metadata.warnings`；`--commit` 省略则从 `--repo-dir` 取 `HEAD`
+```
+[warning] 引用指向不存在的源码: src/legacy.py
+```
+
+### detect —— 检测提交影响的 Wiki 页面（dry-run）
+```bash
+codetowiki detect --metadata wiki/metadata.json --new-commit <sha> --old-commit <old> --repo-dir .
+```
+`--old-commit` 省略时取 `metadata.source.commit_id`。输出分类：精确 / dirname / 父目录 / 新功能文件 / 新功能文件簇 / 可推断放置位置 / 需人工判断 / 未覆盖变更。
+```
+Wiki incremental change analysis (<old> -> <sha>)
+Changed files: 3 (excluded 0, total 3)
+Affected wiki pages: 2
+
+| 级别 | Wiki 页面 | 变更文件 |
+|------|-----------|----------|
+| [精确] | 01-概览.md | src/foo.py |
+```
+
+### lookup —— 反查受影响的 Wiki
+```bash
+codetowiki lookup --metadata wiki/metadata.json --files src/foo.py   # 或 --new-commit <sha> --repo-dir . 先 git diff 再查
+```
+```
+指定文件: 1 个
+
+共 1 篇 Wiki 页面受影响：
+
+  [  1 文件]  01-概览.md
+          ↳ src/foo.py
+```
+
+### wiki-format —— 格式校验（R1-R6）
+```bash
+codetowiki wiki-format --wiki-dir wiki                 # 递归扫描目录
+codetowiki wiki-format --file wiki/01-xxx.md --fix     # 单文件 + 自动修复
+```
+`--wiki-dir` 与 `--file` 互斥必填；`--strict` 使警告也失败；`--json` 输出 JSON。
+```
+Wiki 格式检查报告
+========================================
+文件总数: 1    ✅ 通过: 0    ❌ 错误: 1    ⚠️ 警告: 0
+📄 wiki/01-xxx.md
+   ❌ R1 (行 1): 缺少 <cite> 块
+```
+退出码：`0`=合规；`1`=存在 error（或 `--strict` 时 warning）；`2`=运行异常（文件无法读取 / 非 git 仓库等）。
+
+### cleanup-citations —— 清理失效/重命名引用
+```bash
+codetowiki cleanup-citations --file wiki/01-x.md --dead src/old.py
+codetowiki cleanup-citations --file wiki/01-x.md --renamed src/old.py:src/new.py
+```
+源文件删除/重命名后清理 Wiki 中的 `<cite>` 与 `章节来源` 引用：`--dead` 移除引用条目并清理空来源块，`--renamed` 替换引用路径。`--output` 缺省时覆盖 `--file`。
+
+### sync-index —— 增量同步索引
+```bash
+codetowiki sync-index --metadata wiki/metadata.json --wiki-dir wiki \
+  --wikis wiki/01-x.md wiki/02-y.md --commit <sha> --output wiki/metadata.json
+```
+仅重算指定 Wiki 的 `source_to_wiki` / `wiki_to_source` 与 `stats`，并更新 `source.commit_id`；其余映射不动。增量失败时自动降级为全量 `build-index`。
+
+## Python API
+函数位于子模块（顶层包仅导出 `__version__`）：
+```python
+from codetowiki.wiki_incremental.index_builder import build_index
+from codetowiki.wiki_incremental.change_detection import detect_changes, lookup_wikis
+from codetowiki.wiki_incremental.format_validation import validate_and_fix
+from codetowiki.wiki_incremental.incremental_index import incremental_index_update, safe_index_update
+from codetowiki.wiki_incremental.citation_cleanup import cleanup_dead_citations
+
+metadata = build_index("wiki/", commit_id="<sha>", repo_url="<git-url>", branch="main")
+report = detect_changes(old_commit, new_commit, metadata, repo_dir=".")
+ranked, unmatched = lookup_wikis(metadata["source_to_wiki"], ["src/foo.py"])
+content, violations = validate_and_fix(wiki_markdown)   # R1-R5 自动修；R6 行号需人工补全
+updated = incremental_index_update(metadata, ["01-概览.md"], "<sha>", "wiki/")
+cleaned = cleanup_dead_citations(wiki_markdown, dead_files=["src/old.py"], renamed_files={"src/a.py": "src/b.py"})
+```
+
+

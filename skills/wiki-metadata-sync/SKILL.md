@@ -23,14 +23,15 @@ description: When wiki markdown files are directly created, edited, or deleted (
 | 核心命令 | `detect` + 人工更新 Wiki 内容 | `build-index` 自动全量重建 |
 | 适用场景 | 源码变更后，需要 AI 分析并更新 Wiki | Wiki 原文手动创建/编辑后，更新映射关系 |
 
-## 关键文件
+## 相关命令
 
-| 文件 | 说明 |
+所有能力通过 `codetowiki` CLI 暴露，本 Skill 不直接调用内部模块。
+
+| 命令 | 说明 |
 |------|------|
-| `<wiki_dir>/metadata.json` | 元信息、双向索引、源代码仓库信息 |
-| `src/codetowiki/wiki_incremental/index_builder.py` | 扫描 wiki markdown，解析 `<cite>` 和 `章节来源` 引用，重建 `source_to_wiki` / `wiki_to_source` |
-| `src/codetowiki/cli.py` | `build-index` 命令行入口 |
-| `src/codetowiki/wiki_incremental/incremental_index.py` | 增量更新（仅更新指定 Wiki 的映射） |
+| `codetowiki build-index` | 扫描 wiki markdown，解析 `<cite>` 和 `章节来源` 引用，重建 `source_to_wiki` / `wiki_to_source` |
+| `codetowiki sync-index` | 仅更新指定 Wiki 的映射（增量）；失败自动降级全量 build-index |
+| `codetowiki wiki-format` | Wiki 格式校验 |
 
 ## 前置检查
 
@@ -98,23 +99,20 @@ git commit -m "chore: 更新 metadata.json 双向映射"
 
 如果仅少量 Wiki 文件变更，可使用增量方式避免全量重建：
 
-```python
-from codetowiki.wiki_incremental.incremental_index import incremental_index_update, save_metadata
-from codetowiki.wiki_incremental.json_utils import load_json
-
-metadata = load_json("<wiki_dir>/metadata.json")
-new_commit = "当前HEAD的commit_id"
-affected_wikis = ["核心组件/聚合引擎.md"]
-
-updated = incremental_index_update(metadata, affected_wikis, new_commit, "<wiki_dir>")
-save_metadata(updated, "<wiki_dir>/metadata.json")
+```bash
+codetowiki sync-index \
+  --metadata <wiki_dir>/metadata.json \
+  --wiki-dir <wiki_dir> \
+  --wikis 核心组件/聚合引擎.md \
+  --commit <new_commit> \
+  --output <wiki_dir>/metadata.json
 ```
 
-增量失败时自动降级为全量 `build_index`（`safe_index_update` 函数已内置此逻辑）。
+增量失败时自动降级为全量 `codetowiki build-index`（已内置该逻辑）。
 
 ## build-index 解析机制
 
-`index_builder.py` 的 `parse_citations()` 函数解析以下引用类型：
+`codetowiki build-index` 解析以下引用类型：
 
 | 引用类型 | 识别方式 | 示例 |
 |----------|---------|------|
