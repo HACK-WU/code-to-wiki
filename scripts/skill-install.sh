@@ -25,7 +25,8 @@
 # ============================================================
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# 管道运行（curl|bash）时 BASH_SOURCE[0] 可能为空，用 :- 兜底避免 unbound 报错
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 # 源 skills 目录：默认留空，稍后在父 shell 中解析为远程下载；
 # 仅当显式设置 SKILLS_SRC 且为有效目录时改用本地（开发者覆盖）。
@@ -174,7 +175,7 @@ discover_skills() {
   ( cd "$SOURCE_SKILLS_DIR" && find . -type f | sed 's#^\./##' )
 }
 
-# 本地 skills 目录缺失时（典型场景: curl|bash 管道运行），
+# 默认从远程仓库下载 Skills（SOURCE_SKILLS_DIR 为空或无效时），
 # 从 GitHub 下载仓库 tarball 并解压出 skills/ 作为源。
 fetch_remote_skills() {
   local repo="${REPO:-HACK-WU/CodeToWiki}"
@@ -182,7 +183,7 @@ fetch_remote_skills() {
   local tar_url="https://github.com/${repo}/archive/refs/heads/${ref}.tar.gz"
   local tmp
   tmp="$(mktemp -d)"
-  echo "本地 skills 目录缺失，改从远程下载: ${repo}@${ref}" >&2
+  echo "从远程仓库下载 Skills: ${repo}@${ref}" >&2
 
   if ! curl -fsSL "$tar_url" -o "$tmp/repo.tgz" 2>/dev/null; then
     tar_url="https://github.com/${repo}/archive/${ref}.tar.gz"
