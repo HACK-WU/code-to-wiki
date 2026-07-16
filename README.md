@@ -53,16 +53,17 @@ bash scripts/skill-install.sh --skills -t /path/to/target
 - 位置参数等价于 `-t`（如 `bash scripts/skill-install.sh /path/to/target`）。
 - 远程安装时可用环境变量覆盖来源：`REPO`（默认 `HACK-WU/CodeToWiki`）、`REF`（默认 `master`）；如需改用本地源（开发调试）可用 `SKILLS_SRC` 覆盖源 `skills/` 目录。
 
-## 快速开始
+## Skills 使用方式
 
-```bash
-codetowiki init --project-name myproj --wiki-dir wiki --repo-url <git-url> --branch main --output wiki/metadata.json
-codetowiki build-index --wiki-dir wiki --metadata wiki/metadata.json --repo-dir . --repo-url <git-url> --branch main --output wiki/metadata.json
-codetowiki detect --metadata wiki/metadata.json --new-commit <sha> --repo-dir .
-codetowiki lookup --metadata wiki/metadata.json --files src/foo.py
-codetowiki wiki-format --file wiki/01-xxx.md --fix
-```
-子命令也可作为模块运行：`python -m codetowiki.cli ...`、`python -m codetowiki.wiki_format_check ...`。
+安装到目标项目后，由 CodeBuddy 等 AI 编码助手按场景自动加载。三个 Skill 覆盖「生成 → 增量更新 → 索引同步」完整链路；所有能力均通过 `codetowiki` CLI 暴露，Skill 本身不直接调用内部 Python 模块。
+
+| Skill | 触发场景 | 关键命令 |
+|-------|----------|----------|
+| [`code-to-wiki`](skills/code-to-wiki/SKILL.md) | 用户要求「根据代码生成 wiki」「为某模块写文档」「梳理代码生成文档」。先与用户确认 Wiki 存储位置，再走「大纲确认 → 分批撰写 → 每篇 `codetowiki wiki-format` 校验」流程 | `codetowiki wiki-format --file/--wiki-dir [--fix]` |
+| [`wiki-incremental-update`](skills/wiki-incremental-update/SKILL.md) | 用户要求「根据某 commit 更新 Wiki」「分析变更影响哪些 Wiki 页面」。先 `detect` dry-run，AI 决策新功能是否建页，再更新受影响页面并 `sync-index` | `codetowiki detect` / `codetowiki cleanup-citations` / `codetowiki sync-index` / `codetowiki wiki-format` |
+| [`wiki-metadata-sync`](skills/wiki-metadata-sync/SKILL.md) | 用户直接手动创建/编辑/删除 Wiki 后，要求「更新 metadata.json 映射」「rebuild index」 | `codetowiki build-index` / `codetowiki sync-index` |
+
+> 各 Skill 的详细流程、Wiki 格式规范（R1-R7）与调用纪律见 [`skills/code-to-wiki/SKILL.md`](skills/code-to-wiki/SKILL.md)、[`skills/wiki-incremental-update/SKILL.md`](skills/wiki-incremental-update/SKILL.md)、[`skills/wiki-metadata-sync/SKILL.md`](skills/wiki-metadata-sync/SKILL.md)。
 
 ## metadata.json 结构
 
@@ -201,22 +202,5 @@ codetowiki sync-index --metadata wiki/metadata.json --wiki-dir wiki \
   --wikis wiki/01-x.md wiki/02-y.md --commit <sha> --output wiki/metadata.json
 ```
 仅重算指定 Wiki 的 `source_to_wiki` / `wiki_to_source` 与 `stats`，并更新 `source.commit_id`；其余映射不动。增量失败时自动降级为全量 `build-index`。
-
-## Python API
-函数位于子模块（顶层包仅导出 `__version__`）：
-```python
-from codetowiki.wiki_incremental.index_builder import build_index
-from codetowiki.wiki_incremental.change_detection import detect_changes, lookup_wikis
-from codetowiki.wiki_incremental.format_validation import validate_and_fix
-from codetowiki.wiki_incremental.incremental_index import incremental_index_update, safe_index_update
-from codetowiki.wiki_incremental.citation_cleanup import cleanup_dead_citations
-
-metadata = build_index("wiki/", commit_id="<sha>", repo_url="<git-url>", branch="main")
-report = detect_changes(old_commit, new_commit, metadata, repo_dir=".")
-ranked, unmatched = lookup_wikis(metadata["source_to_wiki"], ["src/foo.py"])
-content, violations = validate_and_fix(wiki_markdown)   # R1-R5 自动修；R6 行号需人工补全
-updated = incremental_index_update(metadata, ["01-概览.md"], "<sha>", "wiki/")
-cleaned = cleanup_dead_citations(wiki_markdown, dead_files=["src/old.py"], renamed_files={"src/a.py": "src/b.py"})
-```
 
 
