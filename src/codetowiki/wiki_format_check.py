@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Check wiki markdown files against the format spec (R1-R6).
 
 The wiki format requirements are defined in
@@ -24,11 +23,12 @@ Optional `--fix` reuses the mechanical fixes from
 from __future__ import annotations
 
 import argparse
+import difflib
 import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
+from collections.abc import Iterable
 
 from codetowiki.wiki_incremental.format_validation import (
     SOURCE_HEADER_RE,
@@ -48,10 +48,31 @@ ANCHOR_LINK_RE = re.compile(r"\[([^\]]+)\]\(#[^)]+\)")
 
 # Source-code style extensions that are expected to carry a `#Lx-Ly` range.
 SOURCE_EXT = {
-    ".py", ".js", ".ts", ".tsx", ".jsx", ".vue", ".go", ".java", ".sh",
-    ".sql", ".html", ".css", ".rs", ".c", ".cpp", ".h", ".rb", ".php",
-    ".yaml", ".yml", ".toml", ".json", ".md",
+    ".py",
+    ".js",
+    ".ts",
+    ".tsx",
+    ".jsx",
+    ".vue",
+    ".go",
+    ".java",
+    ".sh",
+    ".sql",
+    ".html",
+    ".css",
+    ".rs",
+    ".c",
+    ".cpp",
+    ".h",
+    ".rb",
+    ".php",
+    ".yaml",
+    ".yml",
+    ".toml",
+    ".json",
+    ".md",
 }
+
 
 # Sections that are allowed to omit 章节来源 even under strict checking.
 @dataclass(frozen=True)
@@ -81,7 +102,7 @@ def _section_blocks(content: str) -> list[tuple[str, int, int, str]]:
     for idx, match in enumerate(matches):
         title = match.group(1).strip()
         end = matches[idx + 1].start() if idx + 1 < len(matches) else len(content)
-        blocks.append((title, match.start(), end, content[match.start():end]))
+        blocks.append((title, match.start(), end, content[match.start() : end]))
     return blocks
 
 
@@ -101,8 +122,8 @@ def _toc_titles(content: str) -> list[str]:
     # Case 1: a dedicated `## 目录` section.
     m = TOC_HEADING_RE.search(content)
     if m:
-        end = re.search(r"^## ", content[m.end():], re.MULTILINE)
-        block = content[m.end(): m.end() + (end.start() if end else len(content))]
+        end = re.search(r"^## ", content[m.end() :], re.MULTILINE)
+        block = content[m.end() : m.end() + (end.start() if end else len(content))]
         return [g for g in ANCHOR_LINK_RE.findall(block)]
     # Case 2: an inline anchor-link list between the cite block and the first `## `.
     cite_end = 0
@@ -110,7 +131,7 @@ def _toc_titles(content: str) -> list[str]:
     if cite:
         cite_end = cite.end()
     head = HEADING_RE.search(content[cite_end:])
-    region = content[cite_end: cite_end + (head.start() if head else len(content))]
+    region = content[cite_end : cite_end + (head.start() if head else len(content))]
     links = TOP_TOC_RE.findall(region)
     if len(links) >= 2:
         return [g for g in ANCHOR_LINK_RE.findall(region)]
@@ -146,18 +167,18 @@ def _check_r3(content: str) -> list[Violation]:
     violations: list[Violation] = []
     for title, start, _end, block in _section_blocks(content):
         if section_needs_source(title, block):
-            violations.append(Violation("R3", "warning", _line_of(content, start),
-                                       f"章节「{title}」缺少「章节来源」"))
+            violations.append(Violation("R3", "warning", _line_of(content, start), f"章节「{title}」缺少「章节来源」"))
     return violations
 
 
 def _check_r4(content: str) -> list[Violation]:
     violations: list[Violation] = []
     for m in MERMAID_RE.finditer(content):
-        following = content[m.end(): m.end() + 300]
+        following = content[m.end() : m.end() + 300]
         if not re.search(r"^\s*\*{0,2}(图表来源|图示来源)\*{0,2}\s*$", following, re.MULTILINE):
-            violations.append(Violation("R4", "error", _line_of(content, m.start()),
-                                       "Mermaid 图后缺少「图表来源」/「图示来源」"))
+            violations.append(
+                Violation("R4", "error", _line_of(content, m.start()), "Mermaid 图后缺少「图表来源」/「图示来源」")
+            )
     return violations
 
 
@@ -172,7 +193,7 @@ def _iter_source_entries(content: str):
             yield e, e.group(2), _line_of(content, block.start() + e.start()), True
     for header in SOURCE_HEADER_RE.finditer(content):
         end = _source_block_end(content, header.end())
-        for e in ENTRY_RE.finditer(content[header.end():end]):
+        for e in ENTRY_RE.finditer(content[header.end() : end]):
             yield e, e.group(2), _line_of(content, header.end() + e.start()), False
 
 
@@ -248,21 +269,31 @@ def _format_report(results: dict[str, list[Violation]], strict: bool) -> str:
     if not any(results.values()):
         lines.append("全部文件格式合规 ✅")
     else:
-        lines.append("说明: ❌ 错误会令退出码非 0（CI 门禁）；⚠️ 警告默认不阻断，"
-                     "可用 --strict 一并视为失败。")
+        lines.append("说明: ❌ 错误会令退出码非 0（CI 门禁）；⚠️ 警告默认不阻断，可用 --strict 一并视为失败。")
     return "\n".join(lines)
 
 
-def _try_fix(path: Path, content: str) -> tuple[bool, str]:
+def _try_fix(path: Path, content: str, dry_run: bool = False) -> tuple[bool, str]:
     try:
         from codetowiki.wiki_incremental.format_validation import validate_and_fix
     except Exception:  # pragma: no cover - optional dependency
         return False, "（--fix 需要 codetowiki 包，请先安装：pip install codetowiki）"
     fixed, _violations = validate_and_fix(content)
-    if fixed != content:
-        path.write_text(fixed, encoding="utf-8")
-        return True, "已应用机械修复（R1/R2/R3/R4/R5；R6 行号需人工补全）"
-    return False, "无需修复"
+    if fixed == content:
+        return False, "无需修复"
+    if dry_run:
+        diff = difflib.unified_diff(
+            content.splitlines(keepends=True),
+            fixed.splitlines(keepends=True),
+            fromfile=str(path),
+            tofile=str(path),
+        )
+        return True, "".join(diff)
+    # 写盘前先备份原文件，便于回滚
+    backup = path.with_name(path.name + ".bak")
+    backup.write_text(content, encoding="utf-8")
+    path.write_text(fixed, encoding="utf-8")
+    return True, f"已应用机械修复（R1/R2/R3/R4/R5；R6 行号需人工补全）；原文件备份于 {backup}"
 
 
 # ---------------------------------------------------------------------------
@@ -274,6 +305,7 @@ def main(argv: list[str] | None = None) -> int:
     group.add_argument("--wiki-dir", help="待检查的 wiki 目录（递归扫描 *.md）")
     group.add_argument("--file", help="待检查的单个 wiki 文件")
     parser.add_argument("--fix", action="store_true", help="自动修复可机械修复的问题（需 codetowiki 包）")
+    parser.add_argument("--dry-run", action="store_true", help="与 --fix 配合：仅打印将应用的修改，不写盘、不备份")
     parser.add_argument("--strict", action="store_true", help="警告也视为失败（退出码非 0）")
     parser.add_argument("--json", action="store_true", help="以 JSON 输出结果")
     args = parser.parse_args(argv)
@@ -284,26 +316,29 @@ def main(argv: list[str] | None = None) -> int:
         rel = p.as_posix()
         results[rel] = check_file(p)
         if args.fix and results[rel]:
-            changed, note = _try_fix(p, p.read_text(encoding="utf-8"))
-            results[rel] = check_file(p)  # re-check after fix
+            content = p.read_text(encoding="utf-8")
+            changed, note = _try_fix(p, content, args.dry_run)
             if changed:
-                print(f"[fix] {rel}: {note}")
+                print(f"[fix] {rel}:")
+                print(note)
+            if not args.dry_run:
+                results[rel] = check_file(p)  # re-check after fix
     else:
         for p in iter_markdown_files(args.wiki_dir):
             rel = p.relative_to(args.wiki_dir).as_posix()
             results[rel] = check_file(p)
             if args.fix and results[rel]:
-                changed, note = _try_fix(p, p.read_text(encoding="utf-8"))
-                results[rel] = check_file(p)
+                content = p.read_text(encoding="utf-8")
+                changed, note = _try_fix(p, content, args.dry_run)
                 if changed:
-                    print(f"[fix] {rel}: {note}")
+                    print(f"[fix] {rel}:")
+                    print(note)
+                if not args.dry_run:
+                    results[rel] = check_file(p)
 
     if args.json:
         payload = {
-            path: [
-                {"rule": v.rule, "severity": v.severity, "line": v.line, "message": v.message}
-                for v in vs
-            ]
+            path: [{"rule": v.rule, "severity": v.severity, "line": v.line, "message": v.message} for v in vs]
             for path, vs in sorted(results.items())
         }
         sys.stdout.write(__import__("json").dumps(payload, ensure_ascii=False, indent=2))

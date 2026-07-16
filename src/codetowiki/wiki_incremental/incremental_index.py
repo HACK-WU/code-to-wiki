@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Incrementally refresh metadata indexes after wiki changes."""
 
 from __future__ import annotations
@@ -53,11 +52,24 @@ def incremental_index_update(
                 source_to_wiki[src].append(wiki_path)
                 source_to_wiki[src].sort()
 
+    # NEG-10: 清理 source_to_wiki 中仍指向已删除/已失效 wiki 的残留条目
+    wiki_keys = set(wiki_to_source.keys())
+    pruned = 0
+    for src in list(source_to_wiki.keys()):
+        remaining = [w for w in source_to_wiki[src] if w in wiki_keys]
+        if remaining:
+            source_to_wiki[src] = sorted(remaining)
+        else:
+            source_to_wiki.pop(src, None)
+            pruned += 1
+
     updated.setdefault("source", {})["commit_id"] = new_commit
     stats = updated.setdefault("stats", {})
     stats["source_count"] = len(source_to_wiki)
     stats["wiki_count"] = len(wiki_to_source)
     stats["citation_count"] = sum(len(sources) for sources in wiki_to_source.values())
+    if pruned:
+        stats["pruned_stale_links"] = pruned
     return updated
 
 

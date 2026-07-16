@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Detect source changes that can affect wiki pages."""
 
 from __future__ import annotations
@@ -6,11 +5,12 @@ from __future__ import annotations
 import argparse
 import os
 import subprocess
+import sys
 from dataclasses import asdict, dataclass, field
 from pathlib import PurePosixPath
-from typing import Iterable
+from collections.abc import Iterable
 
-from .json_utils import load_json
+from .json_utils import load_json, GitError, MetadataError
 from .pattern_inference import PlacementSuggestion, suggest_placements_batch
 
 
@@ -134,8 +134,28 @@ def run_git_diff(
     cmd.extend(pathspec_args)
     result = subprocess.run(cmd, cwd=repo_dir, capture_output=True, text=True)
     if result.returncode != 0:
-        raise RuntimeError(result.stderr.strip() or "git diff failed")
+        raise GitError(result.stderr.strip() or "git diff failed")
     return _parse_name_status(result.stdout)
+
+
+def verify_commit(repo_dir: str, commit: str) -> None:
+    """NEG-03: 在 diff 前校验 commit 是否存在且确为 commit 对象，给出精准的友好报错。
+
+    使用 ``<rev>^{commit}`` 峰值解析，确保传入的不是 tag/tree/blob 等非 commit 对象
+    （裸 ``--verify`` 对这些对象同样返回 0，会导致后续 ``git diff`` 行为异常）。
+    """
+    result = subprocess.run(
+        ["git", "rev-parse", "--verify", "--quiet", f"{commit}^{{commit}}"],
+        cwd=repo_dir,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise GitError(
+            f"commit 不存在或无法解析为 commit 对象: {commit}\n"
+            f"请用 --old-commit / --new-commit 传入有效的 commit 哈希；"
+            f"若仓库为浅克隆，父提交可能不可用，请显式指定 --old-commit。"
+        )
 
 
 def three_level_match(changed_path: str, source_to_wiki: dict[str, list[str]]) -> MatchResult:
@@ -182,7 +202,7 @@ def _cluster_new_files(
     for path in new_paths:
         parts = PurePosixPath(path).parts
         if len(parts) >= cluster_depth + 1:
-            ancestor = "/".join(parts[:cluster_depth + 1])
+            ancestor = "/".join(parts[: cluster_depth + 1])
         elif len(parts) >= 2:
             ancestor = "/".join(parts[:2])
         else:
@@ -238,11 +258,13 @@ def classify_changes(
     # Run pattern inference on new features to suggest wiki placements
     new_paths: list[str] = []
     if any(e.status in ("A", "C", "R") for e in git_entries):
-        new_paths = [e.path for e in git_entries if e.status in ("A", "C", "R") and three_level_match(e.path, source_to_wiki).level == "none"]
+        new_paths = [
+            e.path
+            for e in git_entries
+            if e.status in ("A", "C", "R") and three_level_match(e.path, source_to_wiki).level == "none"
+        ]
         if new_paths:
-            suggestions, unmatched_new = suggest_placements_batch(
-                new_paths, source_to_wiki, repo_prefix=repo_prefix
-            )
+            suggestions, unmatched_new = suggest_placements_batch(new_paths, source_to_wiki, repo_prefix=repo_prefix)
             report.suggested_placements = suggestions
             report.unmatched_new = unmatched_new
     # Cluster new files by shared directory for AI feature analysis
@@ -279,7 +301,9 @@ def lookup_wikis(
     return ranked, unmatched
 
 
-def format_lookup(ranked: list[tuple[str, int, list[str]]], input_summary: str = "", unmatched: list[str] | None = None) -> str:
+def format_lookup(
+    ranked: list[tuple[str, int, list[str]]], input_summary: str = "", unmatched: list[str] | None = None
+) -> str:
     """Format ranked wiki lookup results."""
     lines: list[str] = []
     if input_summary:
@@ -308,11 +332,15 @@ def format_lookup(ranked: list[tuple[str, int, list[str]]], input_summary: str =
 def detect_changes(old_commit: str, new_commit: str, metadata: dict, repo_dir: str = ".") -> ChangeReport:
     source_to_wiki = metadata.get("source_to_wiki") or {}
     if not source_to_wiki:
-        raise ValueError("metadata.json does not contain source_to_wiki; run build-index first")
+        raise MetadataError(
+            "metadata.json 中缺少 source_to_wiki，无法检测变更。\n请先运行 `codetowiki build-index` 生成索引。"
+        )
     repo_prefix = metadata.get("repo_prefix", "")
     all_entries = run_git_diff(old_commit, new_commit, metadata, repo_dir, apply_filters=False)
     filtered_entries = run_git_diff(old_commit, new_commit, metadata, repo_dir, apply_filters=True)
-    return classify_changes(filtered_entries, source_to_wiki, old_commit, new_commit, len(all_entries), repo_prefix=repo_prefix)
+    return classify_changes(
+        filtered_entries, source_to_wiki, old_commit, new_commit, len(all_entries), repo_prefix=repo_prefix
+    )
 
 
 def report_to_dict(report: ChangeReport) -> dict:
@@ -388,11 +416,20 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--repo-dir", default=".")
     args = parser.parse_args(argv)
 
-    metadata = load_json(args.metadata)
-    old_commit = args.old_commit or metadata.get("source", {}).get("commit_id")
-    if not old_commit:
-        raise SystemExit("old commit is required or metadata.source.commit_id must exist")
-    report = detect_changes(old_commit, args.new_commit, metadata, args.repo_dir)
+    try:
+        metadata = load_json(args.metadata)
+        verify_commit(args.repo_dir, args.new_commit)
+        if args.old_commit:
+            verify_commit(args.repo_dir, args.old_commit)
+        old_commit = args.old_commit or metadata.get("source", {}).get("commit_id")
+        if not old_commit:
+            raise MetadataError(
+                "缺少 old commit：请通过 --old-commit 显式传入，或确保 metadata.json 中 source.commit_id 存在。"
+            )
+        report = detect_changes(old_commit, args.new_commit, metadata, args.repo_dir)
+    except (MetadataError, GitError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
     print(format_report(report))
     return 0
 

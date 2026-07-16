@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Build source/wiki citation indexes from wiki markdown files.
 
 This is a *reference index* (pure local JSON). It parses ``<cite>`` blocks and
@@ -20,9 +19,9 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
+from collections.abc import Iterable
 
-from .json_utils import atomic_save_json, load_json
+from .json_utils import atomic_save_json, load_json, GitError, MetadataError
 
 CITE_BLOCK_RE = re.compile(r"<cite>.*?</cite>", re.DOTALL)
 ENTRY_RE = re.compile(r"^- \[([^\]]+)\]\(file://([^)]+)\)\s*$", re.MULTILINE)
@@ -103,7 +102,11 @@ def parse_citations(wiki_path: str, wiki_content: str) -> list[Citation]:
         end = _source_block_end(wiki_content, start)
         block = wiki_content[start:end]
         cite_type = "chart_source" if label in ("图表来源", "图示来源") else "section_source"
-        section = _nearest_mermaid_section(wiki_content, header.start()) if cite_type == "chart_source" else _nearest_heading(wiki_content, header.start())
+        section = (
+            _nearest_mermaid_section(wiki_content, header.start())
+            if cite_type == "chart_source"
+            else _nearest_heading(wiki_content, header.start())
+        )
         for entry in ENTRY_RE.finditer(block):
             source_path = clean_source_path(entry.group(2))
             if source_path:
@@ -125,13 +128,20 @@ def build_indexes(citations: list[Citation]) -> tuple[dict[str, list[str]], dict
 
 
 def _current_commit(repo_dir: str | Path) -> str:
-    result = subprocess.run(
-        ["git", "rev-parse", "HEAD"],
-        cwd=repo_dir,
-        capture_output=True,
-        text=True,
-        check=True,
-    )
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=repo_dir,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except (subprocess.CalledProcessError, FileNotFoundError) as exc:
+        # CalledProcessError: git 存在但失败（非仓库等）；FileNotFoundError: git 未安装/不在 PATH
+        raise GitError(
+            f"获取当前 commit 失败：当前目录不是 git 仓库或 git 不可用（{repo_dir}）。\n"
+            f"请切到仓库根目录，或用 --repo-dir 指定仓库路径，或显式传入 --commit。"
+        ) from exc
     return result.stdout.strip()
 
 
@@ -142,6 +152,8 @@ def build_index(
     repo_url: str = "",
     branch: str = "",
     repo_prefix: str = "",
+    check_paths: bool = False,
+    repo_dir: str | Path = ".",
 ) -> dict:
     root = Path(wiki_dir)
     if not root.exists():
@@ -160,6 +172,35 @@ def build_index(
             warnings.append(f"skip {wiki_path}: {exc}")
             continue
         citations.extend(parse_citations(wiki_path, content))
+
+    # NEG-07: 可选地校验 wiki 引用的源码路径是否真实存在，避免索引指向幽灵文件。
+    # 解析约定：
+    #   - 相对路径：基于 --repo-dir 解析，且要求落在仓库根内（防止 ".." 穿越导致误判）。
+    #   - 绝对路径：按文件系统真实根解析，仅校验存在性（不强制落在仓库根内）。
+    if check_paths:
+        repo_root = Path(repo_dir).resolve()
+        phantom: set[str] = set()
+        for citation in citations:
+            sp = citation.source_path
+            if not sp or sp.startswith(("#", "http://", "https://", "mailto:")):
+                continue
+            if sp.startswith("/"):
+                # 绝对路径：按真实根解析，直接判存在性
+                candidate = Path(sp).resolve()
+                if not candidate.exists():
+                    phantom.add(sp)
+                continue
+            # 相对路径：基于 repo_root 解析，并要求解析后仍落在仓库根内
+            candidate = (repo_root / sp).resolve()
+            try:
+                candidate.relative_to(repo_root)
+                inside_repo = True
+            except ValueError:
+                inside_repo = False  # 路径穿越到仓库外，视为无效引用
+            if not inside_repo or not candidate.exists():
+                phantom.add(sp)
+        for sp in sorted(phantom):
+            warnings.append(f"引用指向不存在的源码: {sp}")
 
     source_to_wiki, wiki_to_source = build_indexes(citations)
     metadata = dict(base_metadata or {})
@@ -200,14 +241,35 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output")
     parser.add_argument("--repo-url", default="", help="source code repository URL")
     parser.add_argument("--branch", default="", help="source code branch name")
-    parser.add_argument("--repo-prefix", default="", help="optional leading path to strip when inferring wiki placement")
+    parser.add_argument(
+        "--repo-prefix", default="", help="optional leading path to strip when inferring wiki placement"
+    )
+    parser.add_argument(
+        "--check-paths", action="store_true", help="校验 wiki 引用的源码路径是否存在于仓库（检测幽灵引用）"
+    )
     args = parser.parse_args(argv)
 
-    base = load_json(args.metadata) if args.metadata else None
-    commit = args.commit or _current_commit(args.repo_dir)
-    metadata = build_index(
-        args.wiki_dir, commit, base, repo_url=args.repo_url, branch=args.branch, repo_prefix=args.repo_prefix
-    )
+    try:
+        base = load_json(args.metadata) if args.metadata else None
+        commit = args.commit or _current_commit(args.repo_dir)
+        metadata = build_index(
+            args.wiki_dir,
+            commit,
+            base,
+            repo_url=args.repo_url,
+            branch=args.branch,
+            repo_prefix=args.repo_prefix,
+            check_paths=args.check_paths,
+            repo_dir=args.repo_dir,
+        )
+    except (MetadataError, GitError, FileNotFoundError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+
+    # 幽灵引用等警告写入 metadata 的同时同步提示到 stderr，避免用户忽视
+    for warning in metadata.get("warnings", []):
+        print(f"[warning] {warning}", file=sys.stderr)
+
     if args.output:
         atomic_save_json(metadata, args.output)
     else:

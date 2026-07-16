@@ -1,0 +1,21 @@
+{
+  "requirements": [
+    {
+      "id": "NEG-REQ-001",
+      "title": "CodeToWiki 负向需求（错误使用 / 状态异常场景）",
+      "type": "negative-requirement",
+      "file": "negative-requirement.md",
+      "created": "2026-07-16",
+      "status": "draft",
+      "related_positive": [
+        "REQ-01",
+        "REQ-02",
+        "REQ-03",
+        "REQ-04",
+        "REQ-05",
+        "REQ-06",
+        "REQ-07"
+      ]
+    }
+  ]
+}

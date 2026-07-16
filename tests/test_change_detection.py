@@ -1,18 +1,24 @@
-# -*- coding: utf-8 -*-
 """Tests for change_detection path filtering and shared R3 helper."""
 
 from __future__ import annotations
+
+import subprocess
+
+import pytest
 
 from codetowiki.wiki_incremental.change_detection import (
     ChangedFile,
     build_pathspec_args,
     classify_changes,
+    detect_changes,
+    verify_commit,
 )
 from codetowiki.wiki_incremental.format_validation import section_needs_source
 from codetowiki.wiki_incremental.index_builder import (
     DEFAULT_EXCLUDED_PATHS,
     DEFAULT_NOISE_PATHS,
 )
+from codetowiki.wiki_incremental.json_utils import GitError, MetadataError
 
 
 def test_excluded_directory_does_not_get_trailing_star() -> None:
@@ -76,3 +82,51 @@ def test_rename_of_mapped_file_stays_exact_hit() -> None:
     report = classify_changes(entries, source_to_wiki, "old", "new")
     assert any("用户模块.md" in w for r in report.exact_hits for w in r.wiki_paths)
     assert report.new_features == []
+
+
+# --- NEG-03: commit 校验 & metadata 缺失错误 --------------------------------
+
+
+def _init_repo_with_commit(tmp_path) -> str:
+    """在 tmp_path 建一个含单次提交的 git 仓库，返回其 commit 哈希。"""
+    run = lambda *a: subprocess.run(  # noqa: E731
+        a, cwd=tmp_path, capture_output=True, text=True, check=True
+    )
+    run("git", "init", "-q")
+    run("git", "config", "user.email", "t@t.io")
+    run("git", "config", "user.name", "t")
+    (tmp_path / "f.txt").write_text("hi\n", encoding="utf-8")
+    run("git", "add", ".")
+    run("git", "commit", "-q", "-m", "init")
+    result = subprocess.run(["git", "rev-parse", "HEAD"], cwd=tmp_path, capture_output=True, text=True, check=True)
+    return result.stdout.strip()
+
+
+def test_verify_commit_accepts_valid_commit(tmp_path) -> None:
+    commit = _init_repo_with_commit(tmp_path)
+    verify_commit(str(tmp_path), commit)  # 不应抛异常
+
+
+def test_verify_commit_rejects_unknown_commit(tmp_path) -> None:
+    _init_repo_with_commit(tmp_path)
+    with pytest.raises(GitError):
+        verify_commit(str(tmp_path), "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef")
+
+
+def test_verify_commit_rejects_non_commit_object(tmp_path) -> None:
+    """tag/tree/blob 等非 commit 对象应被拒绝（M2 回归）。"""
+    _init_repo_with_commit(tmp_path)
+    tree = subprocess.run(
+        ["git", "rev-parse", "HEAD^{tree}"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    with pytest.raises(GitError):
+        verify_commit(str(tmp_path), tree)
+
+
+def test_detect_changes_without_source_to_wiki_raises_metadata_error() -> None:
+    with pytest.raises(MetadataError):
+        detect_changes("old", "new", {}, ".")
